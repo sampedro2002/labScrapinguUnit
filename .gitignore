@@ -1,0 +1,9 @@
+.chrome_profile/
+*_data.json
+AGENTS.md
+.venv/
+venv/
+env/
+scrap/
+__pycache__/
+*.py[cod]
