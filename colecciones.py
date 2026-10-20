@@ -87,38 +87,11 @@ def _collect_users(page, username, kind, limit):
     return users[:limit]
 
 
-def run_followers(page, username, limit=50):
+def run_followers(page, username, limit=25):
     return _collect_users(page, username, "followers", limit)
 
 
-def run_following(page, username, limit=50):
+def run_following(page, username, limit=25):
     return _collect_users(page, username, "following", limit)
 
 
-def run_posts(page, username, limit=50):
-    page.goto(PROFILE_URL.format(username=username), wait_until="commit", timeout=60000)
-    posts = {}
-    unchanged = 0
-
-    for _ in range(40):
-        items = page.locator('a[href*="/p/"], a[href*="/reel/"]').evaluate_all(
-            "els => els.map(a => ({url: a.href, description: a.querySelector('img')?.alt || ''}))"
-        )
-        before = len(posts)
-        for item in items:
-            if item["url"] not in posts:
-                posts[item["url"]] = item["description"]
-                if len(posts) >= limit:
-                    break
-        if len(posts) >= limit:
-            break
-        unchanged = unchanged + 1 if len(posts) == before else 0
-        if unchanged >= 5:
-            break
-        page.evaluate("window.scrollBy(0, Math.max(500, window.innerHeight))")
-        time.sleep(0.8)
-
-    return [
-        {"url": url, "description": description}
-        for url, description in list(posts.items())[:limit]
-    ]

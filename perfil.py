@@ -25,7 +25,7 @@ def run_perfil(page, username):
     bio_items = page.locator("header section div[dir='auto']").all_inner_texts()
     data = {
         "username": username,
-        "biography": "\n".join(text.strip() for text in bio_items if text.strip()) or None,
+        "bio":"\n".join(text.strip() for text in bio_items if text.strip()) or None,
     }
     data.update(extract_stats(meta))
     print(data)

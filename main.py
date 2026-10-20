@@ -1,8 +1,12 @@
 import json
 
 from browser import close_browser, get_page
-from colecciones import run_followers, run_following, run_posts
+from colecciones import run_followers, run_following
 from perfil import run_perfil
+from posts import run_posts
+
+
+LIMIT = 25
 
 
 def main():
@@ -22,14 +26,15 @@ def main():
             print("No se pudieron obtener los datos del perfil.")
             return
 
-        for label, key, scraper in (
-            ("seguidores", "followers_list", run_followers),
-            ("seguidos", "following_list", run_following),
-            ("publicaciones", "publications", run_posts),
+        for label, key, scraper, limit in (
+            ("seguidores", "followers_list", run_followers, LIMIT),
+            ("seguidos", "following_list", run_following, LIMIT),
+            ("publicaciones", "publications",
+             lambda p, u, limit: run_posts(p, u, limit, LIMIT), LIMIT),
         ):
-            print(f"Obteniendo hasta 50 {label}...")
+            print(f"Obteniendo hasta {limit} {label}...")
             try:
-                data[key] = scraper(page, username, limit=50)
+                data[key] = scraper(page, username, limit=limit)
                 print(f"Obtenidos: {len(data[key])}")
             except Exception as error:
                 data[key] = []
