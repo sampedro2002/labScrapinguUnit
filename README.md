@@ -140,12 +140,7 @@ Los valores son ilustrativos. Si una sección falla, queda como lista vacía y e
 
 | Archivo | Función |
 |---|---|
-| `main.py` | Coordina la ejecución, define el límite y guarda el JSON |
-| `browser.py` | Abre Chrome, reutiliza el perfil local e inyecta las cookies de `.env` |
-| `perfil.py` | Biografía y estadísticas básicas del perfil |
-| `colecciones.py` | Seguidores y seguidos |
-| `posts.py` | Publicaciones y sus comentarios |
-| `parser.py` | Interpreta cantidades como `1.2k` o `3M` |
+| `main.py` | Script unificado: automatización del navegador, extracción de perfil, seguidores, seguidos, publicaciones, comentarios y guardado en JSON |
 | `.env.example` | Plantilla de cookies |
 | `requirements.txt` | Dependencias de Python |
 | `LICENSE` | Licencia MIT |
