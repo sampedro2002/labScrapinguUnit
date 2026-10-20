@@ -1,170 +1,280 @@
-# Scraper de perfiles de Instagram
+# Scraper de Perfiles de Instagram
 
-Aplicación de línea de comandos en Python que, con Playwright y Chrome, consulta un perfil de Instagram y guarda la información pública en un archivo JSON local. Proyecto del laboratorio de Scraping (Arquitectura, semestre 7).
+Aplicación de línea de comandos en Python que, mediante automatización de navegador con **Playwright** y **Google Chrome**, consulta un perfil de Instagram y extrae su información pública, métricas, lista de seguidores, seguidos, publicaciones y comentarios en un archivo JSON estructurado. Proyecto desarrollado para el laboratorio de Scraping (Arquitectura de Software, semestre 7).
 
-## Contenido
+---
 
-- [Qué extrae](#qué-extrae)
-- [Requisitos](#requisitos)
-- [Instalación](#instalación)
-- [Uso](#uso)
-- [Sesión de Instagram](#sesión-de-instagram)
-- [Formato del resultado](#formato-del-resultado)
-- [Estructura del proyecto](#estructura-del-proyecto)
-- [Límites y problemas conocidos](#límites-y-problemas-conocidos)
-- [Qué no subir al repositorio](#qué-no-subir-al-repositorio)
-- [Uso responsable](#uso-responsable)
-- [Licencia](#licencia)
+## Tabla de Contenidos
 
-## Qué extrae
+1. [Descripción General](#1-descripción-general)
+2. [Stack Tecnológico y Justificación de Librerías](#2-stack-tecnológico-y-justificación-de-librerías)
+   - [2.1 Librerías utilizadas](#21-librerías-utilizadas)
+   - [2.2 Análisis comparativo: ¿Por qué estas librerías y no otras?](#22-análisis-comparativo-por-qué-estas-librerías-y-no-otras)
+3. [Datos Extraídos](#3-datos-extraídos)
+4. [Requisitos Previos](#4-requisitos-previos)
+5. [Instalación Paso a Paso](#5-instalación-paso-a-paso)
+6. [Gestión de Sesiones (Autenticación)](#6-gestión-de-sesiones-autenticación)
+   - [6.1 Rol de `.chrome_profile` vs `.env`](#61-rol-de-chrome_profile-vs-env)
+   - [6.2 Modo 1: Autenticación manual](#62-modo-1-autenticación-manual)
+   - [6.3 Modo 2: Inyección de cookies desde `.env`](#63-modo-2-inyección-de-cookies-desde-env)
+   - [6.4 Cómo obtener la cookie `sessionid`](#64-cómo-obtener-la-cookie-sessionid)
+7. [Instrucciones de Uso](#7-instrucciones-de-uso)
+8. [Formato del Resultado (JSON)](#8-formato-del-resultado-json)
+9. [Estructura del Proyecto](#9-estructura-del-proyecto)
+10. [Límites y Consideraciones Técnicas](#10-límites-y-consideraciones-técnicas)
+11. [Buenas Prácticas y Exclusiones de Git](#11-buenas-prácticas-y-exclusiones-de-git)
+12. [Uso Ético y Responsable](#12-uso-ético-y-responsable)
+13. [Licencia](#13-licencia)
 
-| Sección | Datos |
+---
+
+## 1. Descripción General
+
+Instagram es una Single Page Application (SPA) con arquitectura dinámica, protegida por medidas anti-bot y con generación de contenido bajo demanda (scroll infinito y carga asíncrona de modales). Esta herramienta automatiza un flujo de navegación real utilizando una instancia controlada de Google Chrome, permitiendo la recolección de datos públicos respetando tiempos de espera para mitigar bloqueos temporales.
+
+---
+
+## 2. Stack Tecnológico y Justificación de Librerías
+
+### 2.1 Librerías utilizadas
+
+| Librería | Propósito principal | Tipo |
+|---|---|---|
+| **`playwright`** (>=1.40) | Control y automatización del navegador Chrome, manejo de contextos persistentes, esperas automáticas y ejecución de peticiones internas vía JavaScript. | Externa (`requirements.txt`) |
+| **`python-dotenv`** (>=1.0.0) | Carga de variables de entorno seguras desde archivo `.env` (credenciales y cookies). | Externa (`requirements.txt`) |
+| **`re`** | Expresiones regulares para parseo de métricas compactas (`1.2k`, `3M`) y extracción de IDs de publicaciones. | Estándar de Python |
+| **`json`** | Deserialización de respuestas de la API interna y serialización del resultado final en JSON estructurado. | Estándar de Python |
+| **`datetime` / `time`** | Conversión de marcas de tiempo UNIX a fechas legibles y control de pausas entre scrolls. | Estándar de Python |
+| **`urllib.parse`** | Análisis de rutas y descarte de URLs ajenas en los modales de interacción. | Estándar de Python |
+| **`pathlib`** | Gestión agnóstica de rutas en el sistema de archivos (compatible con Windows, macOS y Linux). | Estándar de Python |
+
+---
+
+### 2.2 Análisis comparativo: ¿Por qué estas librerías y no otras?
+
+#### ¿Por qué Playwright y no Selenium?
+- **Manejo de esperas y sincronización**: Selenium depende de esperas explícitas manuales (`WebDriverWait`) que suelen ser frágiles ante renderizados asíncronos pesados. Playwright incorpora *auto-waiting* nativo (espera automáticamente a que los selectores estén visibles, interactuables y renderizados antes de actuar).
+- **Contextos persistentes (`launch_persistent_context`)**: Playwright permite montar un perfil de usuario persistente (`.chrome_profile`) de forma directa y limpia, manteniendo sesiones, almacenamiento local y caché entre corridas sin depender de configuraciones complejas de perfiles de usuario.
+- **Detección anti-bot**: Selenium inyecta variables globales en el navegador (como `navigator.webdriver = true`) que son detectadas inmediatamente por los filtros anti-scraping de Instagram. Playwright interactúa mediante el protocolo CDP (Chrome DevTools Protocol) y canal `chrome`, simulando una interacción de usuario mucho más fidedigna.
+- **Ejecución interna de fetch (`page.evaluate`)**: Playwright permite ejecutar peticiones dentro del contexto de la pestaña activa reutilizando directamente las credenciales de sesión y cabeceras de Instagram (`X-IG-App-ID`), evitando la necesidad de emular peticiones HTTP externas complejas.
+
+#### ¿Por qué Playwright y no BeautifulSoup4 / Requests?
+- **Naturaleza SPA de Instagram**: Herramientas como `requests` o `urllib` sólo obtienen el HTML inicial enviado por el servidor. Dado que Instagram es una aplicación web renderizada en el cliente mediante JavaScript (React), el HTML estático retornado no contiene los seguidores, comentarios ni publicaciones; sólo plantillas vacías.
+- **BeautifulSoup es solo un parser**: `beautifulsoup4` no ejecuta JavaScript ni puede interactuar con el DOM (no puede hacer clic en botones, abrir diálogos ni realizar scroll infinito). Se requeriría forzosamente un navegador real.
+- **Login walls y checkpoints**: Peticiones directas con `requests` son bloqueadas o redirigidas inmediatamente al muro de autenticación al carecer de un motor JS, cookies dinámicas y TLS fingerprinting adecuado.
+
+#### ¿Por qué Playwright y no Scrapy?
+- **Complejidad innecesaria**: Scrapy está optimizado para rastreo masivo concurrente en arquitecturas multipágina estáticas. Para sitios reactivos como Instagram, Scrapy requiere middlewares adicionales pesados (como `scrapy-playwright` o Splash), añadiendo capas de complejidad y configuraciones innecesarias para un script de terminal enfocado.
+- **Flujo de interacción secuencial**: La extracción en este laboratorio requiere una secuencia lineal clara (abrir perfil -> extraer bio -> abrir diálogo seguidores -> scroll modal -> capturar publicaciones), modelo en el que Playwright destaca por simplicidad y legibilidad.
+
+#### ¿Por qué `python-dotenv` y no credenciales por consola o quemadas en código?
+- **Seguridad (12-Factor App)**: Quemar cookies o contraseñas en código fuente es una vulnerabilidad crítica que expone credenciales si se comparte el repositorio.
+- **Historial de terminal protegido**: Pasar cookies largas (`sessionid`, tokens) como argumentos de consola (`--cookie ...`) deja los secretos guardados en el historial del sistema (`.bash_history`, `PSReadLine`), exponiéndolos a otros usuarios del equipo.
+
+---
+
+## 3. Datos Extraídos
+
+| Sección | Atributos extraídos |
 |---|---|
-| Perfil | `username`, `bio`, `followers`, `following`, `posts` |
-| Seguidores y seguidos | Nombres de usuario de las cuentas del listado |
-| Publicaciones | `shortcode`, `url`, `caption`, `likes`, `comments_count`, `views`, `timestamp`, `date` |
-| Comentarios | `username` y `text` de cada comentario, dentro de cada publicación |
+| **Perfil** | `username`, `bio`, `followers`, `following`, `posts` |
+| **Seguidores y seguidos** | Lista con los nombres de usuario extraídos del modal interactivo |
+| **Publicaciones** | `shortcode`, `url`, `caption`, `likes`, `comments_count`, `views`, `timestamp`, `date` |
+| **Comentarios** | `username` y `text` por cada comentario dentro de las publicaciones |
 
-Por defecto se obtienen hasta **25** seguidores, 25 seguidos, 25 publicaciones y 25 comentarios por publicación. El límite se cambia con la constante `LIMIT` de `main.py`.
+> [!NOTE]
+> Por defecto el programa obtiene hasta **25** elementos por sección (25 seguidores, 25 seguidos, 25 posts y 25 comentarios por post). Este límite se puede ajustar modificando la constante `LIMIT` en [`main.py`](file:///C:/Users/Det-Pc/Documents/SEMESTRE7/ARQUITECTURA/labScrapinguUnit/main.py#L11).
 
-Detalles de las publicaciones:
+---
 
-- `caption` es `"Sin texto"` si la publicación no tiene descripción.
-- `views` es `"N/A"` cuando no aplica (fotos).
-- `date` tiene el formato `YYYY-MM-DD HH:MM:SS`; `timestamp` es la marca original.
-- Los comentarios llegan en el orden de Instagram (por relevancia) y no incluyen respuestas a comentarios.
+## 4. Requisitos Previos
 
-## Requisitos
+1. **Python**: Versión 3.11 o superior.
+2. **Google Chrome**: Instalado en el sistema operativo (Playwright utiliza el canal oficial `chrome`).
+3. **Conexión a Internet**: Acceso estable a Instagram.
+4. **Cuenta de Instagram**: Requerida para consultar listados de seguidores/seguidos y comentarios completos.
 
-- Python 3.11 o superior.
-- Google Chrome instalado (Playwright usa el canal `chrome`).
-- Conexión a Internet y una cuenta de Instagram.
+---
 
-## Instalación
+## 5. Instalación Paso a Paso
 
-Windows (PowerShell), desde la carpeta del proyecto:
+### 5.1 En Windows (PowerShell)
 
-```powershell
-py -m venv scrap
-.\scrap\Scripts\Activate.ps1
-python -m pip install -r requirements.txt
-```
+1. Crear y activar el entorno virtual:
+   ```powershell
+   py -m venv scrap
+   .\scrap\Scripts\Activate.ps1
+   ```
+   *(Si PowerShell bloquea scripts por directiva de ejecución, puedes usar directamente `.\scrap\Scripts\python.exe`)*.
 
-Si PowerShell bloquea la activación, usa directamente `.\scrap\Scripts\python.exe` en lugar de `python`.
+2. Instalar las dependencias del proyecto:
+   ```powershell
+   python -m pip install -r requirements.txt
+   ```
 
-macOS o Linux:
+3. Instalar los navegadores de Playwright:
+   ```powershell
+   python -m playwright install
+   ```
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -r requirements.txt
-```
+### 5.2 En macOS o Linux
 
-## Uso
+1. Crear y activar el entorno virtual:
+   ```bash
+   python3 -m venv .venv
+   source .venv/bin/activate
+   ```
+
+2. Instalar las dependencias y binarios:
+   ```bash
+   python -m pip install -r requirements.txt
+   python -m playwright install
+   ```
+
+---
+
+## 6. Gestión de Sesiones (Autenticación)
+
+### 6.1 Rol de `.chrome_profile` vs `.env`
+
+- **`.chrome_profile/` (Almacenamiento del navegador)**: Carpeta local donde Chrome guarda caché, almacenamiento local y cookies activas. Permite que, tras iniciar sesión una vez, las siguientes ejecuciones no requieran volver a loguearse.
+- **`.env` (Inyección rápida de credenciales)**: Permite inyectar cookies directamente (por ejemplo, `SESSIONID`) sin necesidad de ingresar usuario ni contraseña en la interfaz, ideal para entornos desatendidos o para renovar una sesión vencida.
+
+---
+
+### 6.2 Modo 1: Autenticación manual
+
+1. Al ejecutar el scraper por primera vez, se abrirá una ventana de Google Chrome.
+2. Si no hay sesión iniciada, ingresa tus credenciales directamente en Instagram.
+3. La sesión quedará guardada en `.chrome_profile/` para las siguientes ocasiones.
+
+---
+
+### 6.3 Modo 2: Inyección de cookies desde `.env`
+
+1. Genera tu archivo `.env` a partir de la plantilla:
+   ```powershell
+   Copy-Item .env.example .env
+   ```
+2. Abre `.env` e ingresa tu cookie de sesión:
+   ```env
+   SESSIONID=tu_sessionid_aqui
+   DS_USER_ID=tu_ds_user_id_aqui      # opcional
+   CSRFTOKEN=tu_csrftoken_aqui        # opcional
+   ```
+
+---
+
+### 6.4 Cómo obtener la cookie `sessionid`
+
+`sessionid` es una cookie con flag `HttpOnly`:
+1. Inicia sesión en [instagram.com](https://www.instagram.com) desde tu navegador habitual.
+2. Presiona `F12` para abrir las **DevTools** y dirígete a la pestaña **Application** (en Firefox: **Almacenamiento**).
+3. En el menú izquierdo, navega a **Cookies** > `https://www.instagram.com`.
+4. Busca el registro `sessionid`, copia su valor y pégalo en tu archivo `.env`.
+
+> [!CAUTION]
+> La cookie `sessionid` equivale a tu contraseña y permite el acceso total a tu cuenta. **Nunca la compartas ni la subas al repositorio.**
+
+---
+
+## 7. Instrucciones de Uso
+
+Ejecuta el script unificado:
 
 ```bash
 python main.py
 ```
 
-1. Escribe el nombre de usuario de Instagram, con o sin `@`.
-2. En la primera ejecución se abre Chrome. Si no hay sesión, inicia sesión en Instagram y vuelve a la consola para presionar Enter.
-3. El programa obtiene perfil, seguidores, seguidos, publicaciones y comentarios sin más preguntas.
-4. El resultado se guarda como `<usuario>_data.json` en la carpeta desde donde ejecutaste el programa.
+1. **Ingreso de objetivo**: El programa solicitará el nombre de usuario de Instagram (con o sin `@`).
+2. **Extracción automatizada**: El script consultará el perfil, abrirá los modales de conexiones y descargará las publicaciones y comentarios.
+3. **Persistencia**: Se creará un archivo `<usuario>_data.json` con toda la información extraída y se mostrará un resumen formateado en la terminal.
 
-La sesión de Chrome se conserva en `.chrome_profile/`, por lo que en las siguientes ejecuciones normalmente no hace falta iniciar sesión otra vez.
+---
 
-## Sesión de Instagram
+## 8. Formato del Resultado (JSON)
 
-Hay dos formas de autenticarse:
-
-- **Manual** (por defecto): inicia sesión en la ventana de Chrome que abre el programa.
-- **Con cookies en `.env`**: evita el inicio manual. Copia la plantilla y rellénala:
-
-```powershell
-Copy-Item .env.example .env
-```
-
-```env
-SESSIONID=tu_sessionid_aqui
-DS_USER_ID=tu_ds_user_id_aqui      # opcional
-CSRFTOKEN=tu_csrftoken_aqui        # opcional
-# o la cadena completa de cookies:
-# INSTAGRAM_COOKIES="sessionid=...; ds_user_id=...; csrftoken=..."
-```
-
-### Cómo obtener `sessionid`
-
-`sessionid` es una cookie `HttpOnly`: JavaScript no puede leerla desde la consola, así que hay que copiarla desde DevTools.
-
-1. Inicia sesión en [instagram.com](https://www.instagram.com) en tu navegador.
-2. Abre DevTools con `F12` y entra en **Application** (Firefox: **Almacenamiento**).
-3. Ve a **Storage > Cookies > https://www.instagram.com**.
-4. Copia el valor de `sessionid` y pégalo en `.env`.
-
-Alternativa: en la pestaña **Network**, recarga la página, abre cualquier petición a Instagram y copia el encabezado `Cookie` completo en `INSTAGRAM_COOKIES`.
-
-`ds_user_id` y `csrftoken` se copian igual desde la tabla de cookies.
-
-> Trata `sessionid` como una contraseña: quien lo tenga puede entrar a tu cuenta. Nunca lo compartas ni lo subas a Git.
-
-## Formato del resultado
+El archivo generado `<usuario>_data.json` sigue la siguiente estructura:
 
 ```json
 {
   "username": "ejemplo",
-  "bio": "Texto de la biografía",
-  "followers": 1200,
-  "following": 300,
-  "posts": 85,
-  "followers_list": ["usuario1", "usuario2"],
-  "following_list": ["usuario3"],
+  "bio": "Texto descriptivo de la biografía",
+  "followers": 15400,
+  "following": 320,
+  "posts": 45,
+  "followers_list": [
+    "usuario_a",
+    "usuario_b"
+  ],
+  "following_list": [
+    "cuenta_oficial"
+  ],
   "publications": [
     {
-      "shortcode": "AbCdEf123",
-      "url": "https://www.instagram.com/p/AbCdEf123/",
-      "caption": "Sin texto",
-      "likes": 150,
-      "comments_count": 12,
+      "shortcode": "Cx1y2Z3w4",
+      "url": "https://www.instagram.com/p/Cx1y2Z3w4/",
+      "caption": "Publicación de prueba",
+      "likes": 230,
+      "comments_count": 15,
       "views": "N/A",
-      "timestamp": 1735689600,
-      "date": "2025-01-01 00:00:00",
-      "comments": [{"username": "usuario1", "text": "¡Genial!"}]
+      "timestamp": 1729382400,
+      "date": "2026-10-19 18:40:00",
+      "comments": [
+        {
+          "username": "seguidor1",
+          "text": "Excelente publicación!"
+        }
+      ]
     }
   ]
 }
 ```
 
-Los valores son ilustrativos. Si una sección falla, queda como lista vacía y el resto se guarda igualmente.
+---
 
-## Estructura del proyecto
+## 9. Estructura del Proyecto
 
-| Archivo | Función |
-|---|---|
-| `main.py` | Script unificado: automatización del navegador, extracción de perfil, seguidores, seguidos, publicaciones, comentarios y guardado en JSON |
-| `.env.example` | Plantilla de cookies |
-| `requirements.txt` | Dependencias de Python |
-| `LICENSE` | Licencia MIT |
+El proyecto está unificado en un único script autoportante:
 
-## Límites y problemas conocidos
+```text
+labScrapinguUnit/
+│
+├── main.py              # Script unificado (navegador, perfil, seguidores, posts, comentarios)
+├── requirements.txt     # Dependencias del proyecto (Playwright y Python-dotenv)
+├── .env.example         # Plantilla de variables de entorno para autenticación
+├── .gitignore           # Reglas de exclusión para credenciales, perfiles y temporales
+├── README.md            # Documentación técnica y guía de uso del proyecto
+└── LICENSE              # Licencia MIT
+```
 
-- Instagram cambia su sitio y sus endpoints internos con frecuencia; si cambian, algunas secciones pueden salir vacías.
-- Pedir muchos datos seguidos puede hacer que Instagram limite o bloquee la cuenta. El programa espera entre peticiones, pero no elimina ese riesgo.
-- Con cuentas privadas que no sigues solo se obtiene lo que Instagram muestra públicamente.
-- Si Chrome no abre, cierra la ventana anterior del scraper y vuelve a ejecutar.
+---
 
-## Qué no subir al repositorio
+## 10. Límites y Consideraciones Técnicas
 
-El `.gitignore` ya excluye estos elementos, pero si alguno se agregó antes a Git, ignorarlo no lo quita del historial y hay que retirarlo del seguimiento:
+1. **Políticas de Rate Limiting**: Solicitar un gran volumen de datos en poco tiempo puede activar bloqueos temporales por IP o cuenta. El script incluye pausas entre peticiones para mitigar riesgos.
+2. **Cuentas Privadas**: Si la cuenta analizada es privada y tu usuario no la sigue, solo se recolectarán los metadatos públicos de la biografía.
+3. **Instancias concurrentes de Chrome**: Si una ventana del scraper quedó colgada en segundo plano, el perfil `.chrome_profile` quedará bloqueado. Asegúrate de cerrar procesos huérfanos de Chrome antes de volver a ejecutar.
+4. **Cambios en selectores de Instagram**: Al ser una plataforma propietaria sin API pública abierta, cambios en el DOM o en endpoints internos pueden requerir actualizaciones en los selectores.
 
-- `.env` y cualquier credencial.
-- `.chrome_profile/`, que contiene datos de sesión.
-- Archivos `*_data.json`, que pueden contener datos personales.
-- Entornos virtuales (`scrap/`, `.venv/`, `venv/`, `env/`) y `__pycache__/`.
+---
 
-## Uso responsable
+## 11. Buenas Prácticas y Exclusiones de Git
 
-Este proyecto es de carácter académico. Úsalo solo con cuentas y datos a los que tengas autorización para acceder. El scraping puede ir contra los Términos de Uso de Instagram, y los datos recopilados pueden ser personales: guárdalos de forma local, no los publiques y respeta la normativa de protección de datos que aplique. Los autores no se hacen responsables del uso que se le dé.
+El archivo `.gitignore` previene la filtración de información sensible. Asegúrate de nunca versionar:
+- Archivos `.env` con credenciales reales.
+- El directorio `.chrome_profile/` (contiene tokens de sesión de tu máquina).
+- Archivos generados `*_data.json` con datos recolectados.
+- Entornos virtuales (`scrap/`, `.venv/`) y carpetas `__pycache__/`.
 
-## Licencia
+---
 
-Distribuido bajo la licencia [MIT](LICENSE).
+## 12. Uso Ético y Responsable
+
+Este desarrollo tiene fines **estrictamente académicos** en el marco del curso de Arquitectura de Software. El scraping automatizado debe realizarse exclusivamente sobre cuentas propias o con autorización expresa, respetando los Términos de Servicio de la plataforma y las regulaciones locales sobre privacidad y tratamiento de datos personales.
+
+---
+
+## 13. Licencia
+
+Proyecto distribuido bajo la licencia [MIT](LICENSE).
